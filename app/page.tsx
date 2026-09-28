@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FileCheck, ShieldAlert, FileText, BadgeCheck } from "lucide-react";
+import { FileCheck, FileText, BadgeCheck } from "lucide-react";
 
 export default function Home() {
   return (

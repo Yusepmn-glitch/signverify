@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { Upload, FileText, CheckCircle, Download, AlertCircle } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { importPrivateKey, calculateSHA256, signData } from "@/utils/crypto";
+import { importPrivateKey, calculateSHA256, signData, decryptPrivateKey } from "@/utils/crypto";
+import { Lock } from "lucide-react";
 
 interface SignatureResult {
   app: string;
@@ -29,6 +30,10 @@ export default function SignPage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SignatureResult | null>(null);
 
+  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [password, setPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrRef = useRef<HTMLDivElement>(null);
 
@@ -46,7 +51,7 @@ export default function SignPage() {
     }
   };
 
-  const handleSign = async () => {
+  const handleSignRequest = () => {
     if (!file) {
       setError("Silakan pilih dokumen PDF terlebih dahulu.");
       return;
@@ -56,27 +61,55 @@ export default function SignPage() {
       return;
     }
 
+    const privKeyData = localStorage.getItem("signverify_private_key");
+    const pubKeyPem = localStorage.getItem("signverify_public_key");
+
+    if (!privKeyData || !pubKeyPem) {
+      setError("Private Key atau Public Key tidak ditemukan. Silakan generate kunci di menu Manajemen Kunci terlebih dahulu.");
+      return;
+    }
+
+    if (privKeyData.includes("-----BEGIN PRIVATE KEY-----")) {
+      executeSign(privKeyData, pubKeyPem);
+    } else {
+      setShowPasswordDialog(true);
+    }
+  };
+
+  const handleUnlockAndSign = async () => {
+    setPasswordError("");
+    if (!password) {
+      setPasswordError("Password tidak boleh kosong.");
+      return;
+    }
+
+    const privKeyData = localStorage.getItem("signverify_private_key");
+    const pubKeyPem = localStorage.getItem("signverify_public_key");
+    
+    if (!privKeyData || !pubKeyPem) return;
+
+    try {
+      const decryptedPem = await decryptPrivateKey(privKeyData, password);
+      await executeSign(decryptedPem, pubKeyPem);
+    } catch (err: unknown) {
+      setPasswordError((err as { message?: string }).message || "Password salah atau Private Key tidak dapat dibuka.");
+    }
+  };
+
+  const executeSign = async (privKeyPem: string, pubKeyPem: string) => {
     try {
       setIsSigning(true);
       setError(null);
 
-      // Get keys from local storage (for demo purposes)
-      const privKeyPem = localStorage.getItem("signverify_private_key");
-      const pubKeyPem = localStorage.getItem("signverify_public_key");
-
-      if (!privKeyPem || !pubKeyPem) {
-        throw new Error("Private Key atau Public Key tidak ditemukan. Silakan generate kunci di menu Manajemen Kunci terlebih dahulu.");
-      }
-
       const privateKey = await importPrivateKey(privKeyPem);
 
       // 1. Calculate SHA-256
-      const hash = await calculateSHA256(file);
+      const hash = await calculateSHA256(file!);
 
       // 2. Prepare metadata
       const date = new Date().toISOString();
       const metadataToSign = JSON.stringify({
-        filename: file.name,
+        filename: file!.name,
         hash,
         name,
         position,
@@ -95,7 +128,7 @@ export default function SignPage() {
         position,
         institution,
         date,
-        filename: file.name,
+        filename: file!.name,
         hash,
         algorithm: "ECDSA-P256",
         signature,
@@ -103,9 +136,11 @@ export default function SignPage() {
       };
 
       setResult(signatureResult);
-    } catch (err: any) {
+      setShowPasswordDialog(false);
+      setPassword("");
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.message || "Gagal membuat tanda tangan digital.");
+      setError((err as { message?: string }).message || "Gagal membuat tanda tangan digital.");
     } finally {
       setIsSigning(false);
     }
@@ -176,7 +211,7 @@ export default function SignPage() {
                 e.stopPropagation();
                 const droppedFile = e.dataTransfer.files?.[0];
                 if (droppedFile && droppedFile.type === 'application/pdf') {
-                  handleFileChange({ target: { files: e.dataTransfer.files } } as any);
+                  handleFileChange({ target: { files: e.dataTransfer.files } } as React.ChangeEvent<HTMLInputElement>);
                 }
               }}
             >
@@ -259,7 +294,7 @@ export default function SignPage() {
             </div>
 
             <button
-              onClick={handleSign}
+              onClick={handleSignRequest}
               disabled={isSigning || !file}
               className="w-full mt-8 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white px-6 py-4 rounded-xl font-bold transition-all shadow-lg shadow-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2"
             >
@@ -360,6 +395,49 @@ export default function SignPage() {
             >
               Tanda tangani dokumen lain
             </button>
+          </div>
+        </div>
+      )}
+
+      {showPasswordDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+            <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+              <Lock className="w-5 h-5 text-blue-400" /> Buka Private Key
+            </h3>
+            <p className="text-sm text-gray-400 mb-4">Masukkan password untuk membuka Private Key dan menandatangani dokumen.</p>
+            <div className="space-y-4">
+              <div>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Masukkan password"
+                />
+              </div>
+              {passwordError && (
+                <p className="text-red-400 text-sm">{passwordError}</p>
+              )}
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={() => {
+                    setShowPasswordDialog(false);
+                    setPassword("");
+                    setPasswordError("");
+                  }}
+                  className="flex-1 bg-gray-800 hover:bg-gray-700 text-white px-4 py-3 rounded-xl font-bold transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={handleUnlockAndSign}
+                  className="flex-1 bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl font-bold transition-colors"
+                >
+                  Buka & Sign
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

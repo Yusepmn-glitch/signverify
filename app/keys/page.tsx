@@ -1,14 +1,34 @@
 "use client";
 
-import { useState } from "react";
-import { KeyRound, ShieldAlert, Download, Copy, Check } from "lucide-react";
-import { generateKeyPair, exportPublicKey, exportPrivateKey } from "@/utils/crypto";
+import { useState, useEffect } from "react";
+import { KeyRound, ShieldAlert, Download, Copy, Check, Lock } from "lucide-react";
+import { generateKeyPair, exportPublicKey, exportPrivateKey, encryptPrivateKey } from "@/utils/crypto";
 
 export default function KeysPage() {
   const [publicKey, setPublicKey] = useState<string | null>(null);
   const [privateKey, setPrivateKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  
+  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [pendingPrivateKey, setPendingPrivateKey] = useState<string | null>(null);
+  const [needsMigration, setNeedsMigration] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
+
+  useEffect(() => {
+    const existingKey = localStorage.getItem("signverify_private_key");
+    if (existingKey && existingKey.includes("-----BEGIN PRIVATE KEY-----")) {
+      const timer = setTimeout(() => {
+        setNeedsMigration(true);
+        setPendingPrivateKey(existingKey);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, []);
 
   const handleGenerateKeys = async () => {
     setIsGenerating(true);
@@ -20,14 +40,52 @@ export default function KeysPage() {
       setPublicKey(pubKey);
       setPrivateKey(privKey);
       
-      // Store in localStorage for demo purposes
+      // Store public key in localStorage
       localStorage.setItem("signverify_public_key", pubKey);
-      localStorage.setItem("signverify_private_key", privKey);
+      
+      // Prompt password for private key
+      setPendingPrivateKey(privKey);
+      setShowPasswordDialog(true);
+      setNeedsMigration(false);
     } catch (error) {
       console.error("Error generating keys:", error);
       alert("Gagal membuat kunci.");
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleSavePrivateKey = async () => {
+    if (!password) {
+      setPasswordError("Password tidak boleh kosong.");
+      return;
+    }
+    if (password.length < 6) {
+      setPasswordError("Password minimal 6 karakter.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setPasswordError("Password tidak cocok.");
+      return;
+    }
+    
+    if (!pendingPrivateKey) return;
+    
+    try {
+      setPasswordError("");
+      const encryptedKey = await encryptPrivateKey(pendingPrivateKey, password);
+      localStorage.setItem("signverify_private_key", encryptedKey);
+      
+      setShowPasswordDialog(false);
+      setPendingPrivateKey(null);
+      setPassword("");
+      setConfirmPassword("");
+      setNeedsMigration(false);
+      
+      setSuccessMessage("Private Key berhasil diamankan.");
+      setTimeout(() => setSuccessMessage(""), 3000);
+    } catch {
+      setPasswordError("Gagal mengenkripsi Private Key.");
     }
   };
 
@@ -55,6 +113,68 @@ export default function KeysPage() {
           Digital signature menggunakan pasangan kunci yang terdiri dari private key dan public key. Kami menggunakan algoritma ECDSA P-256 sesuai standar keamanan modern.
         </p>
       </div>
+
+      {successMessage && (
+        <div className="mb-6 bg-green-500/10 border border-green-500/20 text-green-400 p-4 rounded-xl text-center flex items-center justify-center gap-2">
+          <Check className="w-5 h-5" /> {successMessage}
+        </div>
+      )}
+
+      {needsMigration && (
+        <div className="mb-6 bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 p-4 rounded-xl text-center flex flex-col items-center justify-center gap-2">
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="w-5 h-5" /> <strong>Peringatan Keamanan</strong>
+          </div>
+          <p className="text-sm">Private Key lama Anda belum diamankan. Harap buat password untuk mengenkripsinya.</p>
+          <button
+            onClick={() => setShowPasswordDialog(true)}
+            className="mt-2 bg-yellow-600 hover:bg-yellow-500 text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors"
+          >
+            Amankan Private Key Sekarang
+          </button>
+        </div>
+      )}
+
+      {showPasswordDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+            <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+              <Lock className="w-5 h-5 text-blue-400" /> Amankan Private Key
+            </h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-1">Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Masukkan password"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-1">Konfirmasi Password</label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Konfirmasi password"
+                />
+              </div>
+              {passwordError && (
+                <p className="text-red-400 text-sm">{passwordError}</p>
+              )}
+              <button
+                onClick={handleSavePrivateKey}
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl font-bold transition-colors mt-2"
+              >
+                Simpan Private Key
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="bg-gray-900/50 border border-gray-800 rounded-2xl p-8 mb-8 text-center relative overflow-hidden">
         <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">

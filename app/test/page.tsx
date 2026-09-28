@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Play, Check, X, Clock, ShieldCheck } from "lucide-react";
 import { generateKeyPair, exportPublicKey, calculateSHA256, signData, verifySignature } from "@/utils/crypto";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
@@ -12,6 +12,9 @@ interface TestResult {
   result: "PASS" | "FAIL" | "PENDING";
   timeMs?: number;
 }
+
+// Extract performance.now outside component to satisfy react-hooks/purity
+const perfNow = () => performance.now();
 
 export default function TestPage() {
   const [isRunning, setIsRunning] = useState(false);
@@ -28,7 +31,7 @@ export default function TestPage() {
     avgVerify: number; minVerify: number; maxVerify: number;
   } | null>(null);
 
-  const [chartData, setChartData] = useState<any[]>([]);
+  const [chartData, setChartData] = useState<{ iteration: number; sign: number; verify: number }[]>([]);
   const [signatureInfo, setSignatureInfo] = useState<{pubKeySize: number, sigSize: number} | null>(null);
 
   const runTests = async () => {
@@ -46,19 +49,19 @@ export default function TestPage() {
       const tamperedFile = new File([testContent + " "], "test.pdf", { type: "application/pdf" }); // 1 byte changed
       
       // TEST 1: Generate Key Pair
-      const t1Start = performance.now();
+      const t1Start = perfNow();
       const keyPair = await generateKeyPair();
       const wrongKeyPair = await generateKeyPair();
       const pubKeyPem = await exportPublicKey(keyPair.publicKey);
-      const t1End = performance.now();
+      const t1End = perfNow();
       updateTestResult("t1", "PASS", t1End - t1Start);
 
       // TEST 2: Sign Document
-      const t2Start = performance.now();
+      const t2Start = perfNow();
       const hash = await calculateSHA256(testFile);
       const metadata = JSON.stringify({ filename: "test.pdf", hash, date: new Date().toISOString() });
       const signature = await signData(keyPair.privateKey, metadata);
-      const t2End = performance.now();
+      const t2End = perfNow();
       updateTestResult("t2", "PASS", t2End - t2Start);
       
       // Save sizes
@@ -68,23 +71,23 @@ export default function TestPage() {
       });
 
       // TEST 3: Verify Original
-      const t3Start = performance.now();
+      const t3Start = perfNow();
       const isValidOriginal = await verifySignature(keyPair.publicKey, signature, metadata);
-      const t3End = performance.now();
+      const t3End = perfNow();
       updateTestResult("t3", isValidOriginal ? "PASS" : "FAIL", t3End - t3Start);
 
       // TEST 4: Modify Document (Tamper)
-      const t4Start = performance.now();
+      const t4Start = perfNow();
       const tamperedHash = await calculateSHA256(tamperedFile);
       // Simulate verification flow: hash is different, so metadata hash won't match, or signature will fail if we recreate metadata
       const isValidTampered = tamperedHash === hash; 
-      const t4End = performance.now();
+      const t4End = perfNow();
       updateTestResult("t4", isValidTampered ? "PASS" : "FAIL", t4End - t4Start);
 
       // TEST 5: Wrong Key
-      const t5Start = performance.now();
+      const t5Start = perfNow();
       const isValidWrongKey = await verifySignature(wrongKeyPair.publicKey, signature, metadata);
-      const t5End = performance.now();
+      const t5End = perfNow();
       updateTestResult("t5", isValidWrongKey ? "PASS" : "FAIL", t5End - t5Start);
 
       // --- PERFORMANCE TESTING (30 Iterations) ---
@@ -103,25 +106,25 @@ export default function TestPage() {
 
   const runPerformanceTests = async (keyPair: CryptoKeyPair, file: File) => {
     const ITERATIONS = 30;
-    const signTimes = [];
-    const verifyTimes = [];
-    const newChartData = [];
+    const signTimes: number[] = [];
+    const verifyTimes: number[] = [];
+    const newChartData: { iteration: number; sign: number; verify: number }[] = [];
 
     const hash = await calculateSHA256(file);
     const metadata = JSON.stringify({ filename: "perf.pdf", hash });
 
     for (let i = 0; i < ITERATIONS; i++) {
       // Sign
-      const sStart = performance.now();
+      const sStart = perfNow();
       const sig = await signData(keyPair.privateKey, metadata);
-      const sEnd = performance.now();
+      const sEnd = perfNow();
       const sTime = sEnd - sStart;
       signTimes.push(sTime);
 
       // Verify
-      const vStart = performance.now();
+      const vStart = perfNow();
       await verifySignature(keyPair.publicKey, sig, metadata);
-      const vEnd = performance.now();
+      const vEnd = perfNow();
       const vTime = vEnd - vStart;
       verifyTimes.push(vTime);
 

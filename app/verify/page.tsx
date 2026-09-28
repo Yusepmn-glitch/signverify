@@ -48,7 +48,7 @@ export default function VerifyPage() {
           return;
         }
       }
-    } catch (err) {
+    } catch {
       console.warn("Backend tidak dapat dihubungi untuk validasi metadata. Melanjutkan secara lokal.");
     }
 
@@ -99,7 +99,7 @@ export default function VerifyPage() {
         } else {
           setResult({ isValid: false, message: result.message || "Digital signature tidak cocok.", details: ["Digital signature invalid (Server)"], metadata: qrData });
         }
-      } catch (err) {
+      } catch {
         setError("Backend tidak dapat dihubungi. Melakukan verifikasi lokal...");
         useLocal = true;
       }
@@ -116,7 +116,7 @@ export default function VerifyPage() {
           setError("Backend tidak dapat dihubungi. Verifikasi lokal gagal.");
         }
       }
-    } catch (err: any) { setError(err.message || "Verifikasi gagal."); }
+    } catch (err: unknown) { setError((err as { message?: string }).message || "Verifikasi gagal."); }
     finally { setIsVerifying(false); }
   }, [qrData, pdfForQr]);
 
@@ -143,7 +143,7 @@ export default function VerifyPage() {
       const isValid = await verifySignature(publicKey, metadata.signature, metadataToSign);
       if (isValid) { setResult({ isValid: true, message: "Dokumen valid", details: ["Signature valid", "Hash sesuai", "Identitas penandatangan terverifikasi"], metadata }); }
       else { setResult({ isValid: false, message: "Tanda tangan tidak cocok dengan public key.", details: ["Verifikasi kriptografi gagal", "Public key tidak sesuai"], metadata }); }
-    } catch (err: any) { setError(err.message || "Verifikasi gagal."); }
+    } catch (err: unknown) { setError((err as { message?: string }).message || "Verifikasi gagal."); }
     finally { setIsVerifying(false); }
   };
 

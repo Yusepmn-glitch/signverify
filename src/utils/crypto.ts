@@ -132,3 +132,113 @@ export async function verifySignature(publicKey: CryptoKey, signatureBase64: str
     return false;
   }
 }
+
+export interface EncryptedPrivateKey {
+  version: number;
+  algorithm: string;
+  kdf: string;
+  iterations: number;
+  salt: string;
+  iv: string;
+  ciphertext: string;
+}
+
+const ITERATIONS = 100000;
+
+async function deriveKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
+  const encoder = new TextEncoder();
+  const passwordKey = await window.crypto.subtle.importKey(
+    "raw",
+    encoder.encode(password),
+    { name: "PBKDF2" },
+    false,
+    ["deriveKey"]
+  );
+
+  return window.crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      salt: salt as any,
+      iterations: ITERATIONS,
+      hash: "SHA-256",
+    },
+    passwordKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+export async function encryptPrivateKey(pem: string, password: string): Promise<string> {
+  const salt = window.crypto.getRandomValues(new Uint8Array(16));
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  
+  const key = await deriveKey(password, salt);
+  const encoder = new TextEncoder();
+  
+  const ciphertextBuffer = await window.crypto.subtle.encrypt(
+    {
+      name: "AES-GCM",
+      iv: iv
+    },
+    key,
+    encoder.encode(pem)
+  );
+  
+  const ciphertextArray = Array.from(new Uint8Array(ciphertextBuffer));
+  const ciphertext = window.btoa(String.fromCharCode.apply(null, ciphertextArray));
+  const saltArray = Array.from(salt);
+  const saltBase64 = window.btoa(String.fromCharCode.apply(null, saltArray));
+  const ivArray = Array.from(iv);
+  const ivBase64 = window.btoa(String.fromCharCode.apply(null, ivArray));
+  
+  const encryptedData: EncryptedPrivateKey = {
+    version: 1,
+    algorithm: "AES-GCM",
+    kdf: "PBKDF2",
+    iterations: ITERATIONS,
+    salt: saltBase64,
+    iv: ivBase64,
+    ciphertext: ciphertext
+  };
+  
+  return JSON.stringify(encryptedData);
+}
+
+export async function decryptPrivateKey(encryptedDataStr: string, password: string): Promise<string> {
+  const data: EncryptedPrivateKey = JSON.parse(encryptedDataStr);
+  if (data.version !== 1 || data.algorithm !== "AES-GCM" || data.kdf !== "PBKDF2") {
+    throw new Error("Unsupported encryption format");
+  }
+  
+  const saltString = window.atob(data.salt);
+  const salt = new Uint8Array(saltString.length);
+  for (let i = 0; i < saltString.length; i++) salt[i] = saltString.charCodeAt(i);
+
+  const ivString = window.atob(data.iv);
+  const iv = new Uint8Array(ivString.length);
+  for (let i = 0; i < ivString.length; i++) iv[i] = ivString.charCodeAt(i);
+
+  const ciphertextString = window.atob(data.ciphertext);
+  const ciphertext = new Uint8Array(ciphertextString.length);
+  for (let i = 0; i < ciphertextString.length; i++) ciphertext[i] = ciphertextString.charCodeAt(i);
+  
+  const key = await deriveKey(password, salt);
+  
+  try {
+    const decryptedBuffer = await window.crypto.subtle.decrypt(
+      {
+        name: "AES-GCM",
+        iv: iv
+      },
+      key,
+      ciphertext
+    );
+    
+    const decoder = new TextDecoder();
+    return decoder.decode(decryptedBuffer);
+  } catch {
+    throw new Error("Password salah atau Private Key tidak dapat dibuka.");
+  }
+}

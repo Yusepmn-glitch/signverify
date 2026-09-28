@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Camera, X, CheckCircle, AlertCircle, ImageIcon, ClipboardList } from "lucide-react";
+import { Camera, X, CheckCircle, AlertCircle, ImageIcon } from "lucide-react";
 
 export interface SignVerifyQRData {
   app: string;
@@ -37,6 +37,7 @@ export default function QRScanner({ onResult }: QRScannerProps) {
   const streamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const scanLoopRef = useRef<(() => Promise<void>) | null>(null);
 
   const stopCamera = useCallback(() => {
     if (animFrameRef.current) {
@@ -100,7 +101,7 @@ export default function QRScanner({ onResult }: QRScannerProps) {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas || video.readyState < 2) {
-      animFrameRef.current = requestAnimationFrame(scanLoop);
+      animFrameRef.current = requestAnimationFrame(() => { scanLoopRef.current?.(); });
       return;
     }
     const ctx = canvas.getContext("2d");
@@ -116,8 +117,12 @@ export default function QRScanner({ onResult }: QRScannerProps) {
       validateAndEmit(result);
       return;
     }
-    animFrameRef.current = requestAnimationFrame(scanLoop);
+    animFrameRef.current = requestAnimationFrame(() => { scanLoopRef.current?.(); });
   }, [decodeFrame, stopCamera, validateAndEmit]);
+
+  useEffect(() => {
+    scanLoopRef.current = scanLoop;
+  }, [scanLoop]);
 
   const startCamera = useCallback(async () => {
     setCameraError(null);
@@ -139,25 +144,34 @@ export default function QRScanner({ onResult }: QRScannerProps) {
       setIsCameraActive(true);
       setStatusMessage("Arahkan kamera ke QR Code...");
       animFrameRef.current = requestAnimationFrame(scanLoop);
-    } catch (err: any) {
+    } catch (err: unknown) {
       stopCamera();
       setScanStatus("idle");
-      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+      const error = err as { name?: string; message?: string };
+      if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
         setCameraError("Kamera tidak dapat digunakan. Silakan gunakan Upload QR Image atau Input Data QR.");
       } else {
-        setCameraError(err.message || "Gagal mengakses kamera.");
+        setCameraError(error.message || "Gagal mengakses kamera.");
       }
     }
   }, [scanLoop, stopCamera]);
 
+  const startCameraRef = useRef<(() => Promise<void>) | null>(null);
+  useEffect(() => {
+    startCameraRef.current = startCamera;
+  }, [startCamera]);
+
   useEffect(() => {
     if (isModalOpen && activeTab === "camera" && !isCameraActive && !cameraError) {
-      startCamera();
+      const timer = setTimeout(() => { startCameraRef.current?.(); }, 0);
+      return () => clearTimeout(timer);
     }
     if (!isModalOpen) {
-      stopCamera();
+      const timer = setTimeout(() => { stopCamera(); }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [isModalOpen, activeTab, isCameraActive, cameraError, startCamera, stopCamera]);
+    return undefined;
+  }, [isModalOpen, activeTab, isCameraActive, cameraError, stopCamera]);
 
   const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -180,9 +194,10 @@ export default function QRScanner({ onResult }: QRScannerProps) {
         setScanStatus("error");
         setStatusMessage("❌ QR Code tidak terdeteksi dalam gambar.");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const error = err as { message?: string };
       setScanStatus("error");
-      setStatusMessage("❌ Gagal memproses gambar: " + err.message);
+      setStatusMessage("❌ Gagal memproses gambar: " + (error.message ?? "Error tidak diketahui"));
     }
     if (imageInputRef.current) imageInputRef.current.value = "";
   }, [decodeFrame, validateAndEmit]);
