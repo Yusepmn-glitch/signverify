@@ -883,7 +883,6 @@ Konsep utama:
 
 # 👥 Anggota Kelompok
 
-Silakan isi dengan data anggota kelompok yang sebenarnya.
 
 | Nama                   | NPM         | Peran / Tugas                        |
 | :--------------------- | :---------- | :----------------------------------- |
